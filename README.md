@@ -1,2 +1,2 @@
 # casus_summer_2025
-Our project repo
+Our project repo for the CASUS Summer School 2025
