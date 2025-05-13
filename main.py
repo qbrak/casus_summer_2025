@@ -61,9 +61,10 @@ def interpolate(m, n, p, fun):
     grid = mp.Grid(mis)
     nodes = grid.unisolvent_nodes
 
+    unisolvent_node_vals = fun(nodes)
     Lagrange_poly = mp.LagrangePolynomial.from_grid(grid, fun(nodes))
 
-    return mp.LagrangeToNewton(Lagrange_poly)()
+    return Lagrange_poly, unisolvent_node_vals
 
 
 def RMSE(m, poly, fun, N=1000):
@@ -76,27 +77,40 @@ def RMSE(m, poly, fun, N=1000):
     
     # Compute root mean square error
     rmse = np.sqrt(np.mean((poly_vals - fun_vals)**2))
+    rmse_rel = rmse / np.std(fun_vals)
     
-    return rmse
+    return rmse, rmse_rel
 
 
 def main():
     m = 8
-    n = 5
-    p = 2
-    
-    # Time the interpolation
-    start_time = time.time()
-    poly = interpolate(m, n, p, MU)
-    interpolate_time = time.time() - start_time
-    print(f"Time spent in interpolate: {interpolate_time:.4f} seconds")
+    n = 6
+    p = 1
 
-    # Time the RMSE calculation
-    start_time = time.time()
-    rmse = RMSE(m, poly, MU)
-    rmse_time = time.time() - start_time
-    print(f"Time spent in RMSE: {rmse_time:.4f} seconds")
-    print(f"RMSE: {rmse}")
+    pairs = (
+        # (1, 6),
+        # (2, 5),
+        (1, 7),
+        # (2, 6),
+    )
+
+    for p, n in pairs:
+        print(f"p: {p}, n: {n}")
+        # Time the interpolation
+        start_time = time.time()
+        poly, _ = interpolate(m, n, p, MU)
+        interpolate_time = time.time() - start_time
+        print(f"    Time spent in interpolate: {interpolate_time:.4f} seconds")
+
+        # Time the RMSE calculation
+        poly_newton = mp.LagrangeToNewton(poly)()
+        start_time = time.time()
+        rmse, rmse_rel = RMSE(m, poly_newton, MU)
+        rmse_time = time.time() - start_time
+        print(f"    Time spent in RMSE: {rmse_time:.4f} seconds")
+        print(f"    RMSE: {rmse}, RMSE_rel: {rmse_rel}")
+
+
 
 
 if __name__ == "__main__":
