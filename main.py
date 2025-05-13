@@ -2,6 +2,17 @@ import minterpy as mp
 import numpy as np
 import time
 
+bounds = np.array([
+    [0.15, 0.05], # r_w
+    [50_000, 100], # r
+    [115_600, 63_070], # T_u
+    [1_100, 990], # H_u
+    [116, 63.1], # T_l
+    [820, 700], # H_l
+    [1_680, 1120], # L
+    [12_045, 9_985], # K_w
+])
+
 def M(x):
     """
     Example of input values:
@@ -30,20 +41,9 @@ def MU(x):
         of the input variables.
     
     """
-    bounds = [
-       [0.15, 0.05], # r_w
-       [50_000, 100], # r
-       [115_600, 63_070], # T_u
-       [1_100, 990], # H_u
-       [116, 63.1], # T_l
-       [820, 700], # H_l
-       [1_680, 1120], # L
-       [12_045, 9_985], # K_w
-    ]
-    abounds = np.array(bounds)
-    # breakpoint()
-    mu = 0.5 * (abounds[:,1] + abounds[:,0])
-    sigma = 0.5 * (abounds[:,1] - abounds[:,0])
+
+    mu = 0.5 * (bounds[:,1] + bounds[:,0])
+    sigma = 0.5 * (bounds[:,1] - bounds[:,0])
 
     # Normalize the input
     x = x * sigma + mu
