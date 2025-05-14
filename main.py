@@ -1,6 +1,7 @@
 import minterpy as mp
 import numpy as np
 import time
+from tabulate import tabulate
 
 bounds = np.array([
     [0.15, 0.05], # r_w
@@ -12,6 +13,20 @@ bounds = np.array([
     [1_680, 1120], # L
     [12_045, 9_985], # K_w
 ])
+
+input_names = [
+    "r_w",
+    "r",
+    "T_u",
+    "H_u",
+    "T_l",
+    "H_l",
+    "L",
+    "K_w",
+]
+
+mu = 0.5 * (bounds[:,1] + bounds[:,0])
+sigma = 0.5 * (bounds[:,1] - bounds[:,0])
 
 def M(x):
     """
@@ -43,7 +58,6 @@ def MU(x):
     """
 
     mu = 0.5 * (bounds[:,1] + bounds[:,0])
-    sigma = 0.5 * (bounds[:,1] - bounds[:,0])
 
     # Normalize the input
     x = x * sigma + mu
@@ -84,31 +98,42 @@ def RMSE(m, poly, fun, N=1000):
 
 def main():
     m = 8
-    n = 6
-    p = 1
 
     pairs = (
-        # (1, 6),
-        # (2, 5),
-        (1, 7),
-        # (2, 6),
+        (1, 3),
+        (1, 4),
+        (1, 5),
+        (1, 6),
+        (1, 7), # Used in variance-based sensitivity analysis
+        (2, 5),
     )
 
+    # Create lists to store results
+    results = []
+    
     for p, n in pairs:
-        print(f"p: {p}, n: {n}")
+        print(f"Running interpolation with p: {p}, n: {n}")
+        
         # Time the interpolation
         start_time = time.time()
-        poly, _ = interpolate(m, n, p, MU)
+        poly, unisolvent_node_vals = interpolate(m, n, p, MU)
         interpolate_time = time.time() - start_time
-        print(f"    Time spent in interpolate: {interpolate_time:.4f} seconds")
-
-        # Time the RMSE calculation
+        
+        # Calculate RMSE (without timing it separately)
         poly_newton = mp.LagrangeToNewton(poly)()
-        start_time = time.time()
-        rmse, rmse_rel = RMSE(m, poly_newton, MU)
-        rmse_time = time.time() - start_time
-        print(f"    Time spent in RMSE: {rmse_time:.4f} seconds")
-        print(f"    RMSE: {rmse}, RMSE_rel: {rmse_rel}")
+        _, rmse_rel = RMSE(m, poly_newton, MU)
+        
+        # Store the results
+        results.append([p, n, rmse_rel,
+                        len(unisolvent_node_vals), 
+                        interpolate_time, ])
+    
+    # Display results in a table
+    headers = ["$p$", "$n$", "Rel RMSE", "Node count", 
+               "Interp Time (s)",]
+    
+    print("\nResults Table:")
+    print(tabulate(results, headers=headers, tablefmt="grid", floatfmt=".6f"))
 
 
 

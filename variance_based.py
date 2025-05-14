@@ -5,38 +5,16 @@ from scipy.linalg import solve
 import time
 from tabulate import tabulate
 
+from main import MU, interpolate, input_names
 
-from main import MU, interpolate
 
-def var(m, poly):
-    r"""
-        Compute the variance of the polynomial, assume it is in Newton form (to square it)
-
-        Assuming:
-           $$ Z = Q(X_1, X_2, \ldots, X_m) $$
-        
-        where $X_i$ are independent and uniformly distributed in [-1, 1].
-
-        We will use the formula that:
-              $$ 
-              Var(Z) = E[Z^2] - (E[Z])^2 = 
-              \int_{\square^m}Q(\mathbf{X})^2 d\mathbf{X} - \left(\int_{\square^m}Q(\mathbf{X}) d\mathbf{X}\right)
-              $$
-          
-          where $E[Z]$ is the expected value of $Z$.
-
-          We do this by using the minterpy library to compute the integral of the polynomial.
-    """
-
-    poly2 = poly * poly # FIXME: takes way too much time
-    scaling = 1 / (2**m) # This is because the density in each dimension is 1/2 * lebesgue measure
-    return poly2.integrate_over()*scaling - (poly.integrate_over()*scaling)**2
+############## LEGENDRE CONVERSION ####################
 
 def eval_legendre_multidim(exponents, nodes):
     r"""
         Evaluates the Legendre polynomial at the given nodes.
 
-        We need to normalize the scipy polynomial by 1/(2*n + 1) to get the correct normalization.
+        We need to normalize the scipy polynomial by sqrt(2*n + 1) to get the correct normalization.
 
         This is because we define the Legendre polynomial scalar product as:
         $$ \langle P_m, P_n \rangle = \int_{-1}^1 f(x) g(x) \frac{1}{2}dx $$
@@ -49,11 +27,21 @@ def eval_legendre_multidim(exponents, nodes):
     return values
    
 
-def convert_to_legendre(poly, unisolvent_node_vals):
+def convert_to_legendre(poly, unisolvent_node_vals=None):
     """
-    Converts poly from Lagrange to Legendre basis.
+        Converts poly from Lagrange to Legendre basis.
 
-    Returns the MultiIndexSet and the coefficients of the polynomial in Legendre basis.
+        Returns the MultiIndexSet and the coefficients of the polynomial in Legendre basis.
+
+        This function constructs the Vandermonde matrix from the Legendre to the evaluated points:
+
+        $$
+            V * C_{leg} = f(nodes)
+        $$
+
+        where $VA$ is the Legendre polynomials evaluated at the nodes. 
+        In order to make the function faster you can pass the unisolvent_node_vals
+        as an argument. This is the function evaluated at the nodes.
     """
 
     mis = poly.multi_index
@@ -64,6 +52,10 @@ def convert_to_legendre(poly, unisolvent_node_vals):
     exponents = mis.exponents
     for j in range(len(nodes)):
         VA[:, j] = eval_legendre_multidim(exponents[j,:], nodes) # we need to pass a 2D array to the polynomial
+
+    if unisolvent_node_vals is None:
+        # If the node values are not provided, we need to evaluate the polynomial at the nodes
+        unisolvent_node_vals = poly(nodes)
 
     leg_coeffs = solve(VA, unisolvent_node_vals)
     return mis, leg_coeffs
@@ -295,8 +287,8 @@ def main():
     N = int((m+2)*1e5)
 
     start_time = time.time()
-    mean_fun = mean_mc(m, MU, N=N)
-    var_fun = var_mc(m, MU, N=N)
+    fun_mean = mean_mc(m, MU, N=N)
+    fun_var = var_mc(m, MU, N=N)
 
     importances_mc = dict(
         (i, sobol_effect(i, m, MU, N=N))
@@ -304,8 +296,12 @@ def main():
     )
     monte_carlo_time = time.time() - start_time
 
-    print(f"\nMean difference rel: {abs(mean_fun - mean_leg(leg_coeffs)) / mean_fun:.6f} = {mean_fun - mean_leg(leg_coeffs):.6f} / {mean_fun:.6f}")
-    print(f"Var difference rel: {abs(var_fun - var_leg(leg_coeffs)) / var_fun:.6f} = {var_fun - var_leg(leg_coeffs):.6f} / {var_fun:.6f}")
+    print(f"Using {N} points for Monte Carlo")
+    print(f"Using p={p}, n={n} for interpolation")
+    print(f"\nMean difference rel ((monte_carlo - interpolation) / monte_carlo):")
+    print(f"{abs(fun_mean - mean_leg(leg_coeffs)) / fun_mean:.6f} = {fun_mean - mean_leg(leg_coeffs):.6f} / {fun_mean:.6f}")
+    print(f"Var difference rel ((monte_carlo - interpolation) / monte_carlo):")
+    print(f"{abs(fun_var - var_leg(leg_coeffs)) / fun_var:.6f} = {fun_var - var_leg(leg_coeffs):.6f} / {fun_var:.6f}")
 
     print("\nSobol's main effect")
     # Create table headers and data
@@ -315,10 +311,10 @@ def main():
     # Add the Sobol's main effect to the table
     for i, st in sorted_main_imp_leg:
         mc = importances_mc[i][0]
-        table_data.append([f"{i}", f"{st:.6f}", f"{mc:.6f}", f"{abs(st-mc):.6f}"])
+        table_data.append([f"{i}: ${input_names[i]}$", f"{st:.6f}", f"{mc:.6f}", f"{abs(st-mc):.6f}"])
     
-    # Print the table using tabulate with markdown format
-    print(tabulate(table_data, headers=headers, tablefmt="github"))
+    # Print the table using tabulate with latex format
+    print(tabulate(table_data, headers=headers, tablefmt="latex_raw"))
 
     print("\nSobol's total effect")
     # Create table headers and data
@@ -327,9 +323,9 @@ def main():
     
     for i, st in sorted_total_imp_leg:
         mc = importances_mc[i][1] # Monte Carlo total effect
-        table_data.append([f"{i}", f"{st:.6f}", f"{mc:.6f}", f"{abs(st-mc):.6f}"])
+        table_data.append([f"{i}: ${input_names[i]}$", f"{st:.6f}", f"{mc:.6f}", f"{abs(st-mc):.6f}"])
 
-    print(tabulate(table_data, headers=headers, tablefmt="github"))
+    print(tabulate(table_data, headers=headers, tablefmt="latex_raw"))
 
     print("\nEffective dimension:")
     print(f"   Superposition: {effective_dimension_superposition(mis, leg_coeffs):.6f}")
