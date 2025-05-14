@@ -27,11 +27,12 @@ def eval_legendre_multidim(exponents, nodes):
     return values
    
 
-def convert_to_legendre(poly, unisolvent_node_vals=None):
+def convert_to_legendre(grid, unisolvent_node_vals):
     """
-        Converts poly from Lagrange to Legendre basis.
+        Interpolates the grid with values unisolvent_node_vals in the Legendre basis.
 
-        Returns the MultiIndexSet and the coefficients of the polynomial in Legendre basis.
+        Returns the coefficients in the Legendre basis in the order (for exponents)
+        specified in the grid.
 
         This function constructs the Vandermonde matrix from the Legendre to the evaluated points:
 
@@ -39,26 +40,19 @@ def convert_to_legendre(poly, unisolvent_node_vals=None):
             V * C_{leg} = f(nodes)
         $$
 
-        where $VA$ is the Legendre polynomials evaluated at the nodes. 
-        In order to make the function faster you can pass the unisolvent_node_vals
-        as an argument. This is the function evaluated at the nodes.
+        where $VA$ is the Legendre polynomials evaluated at the nodes.
+        The f(nodes) are the unisolvent_node_values.
     """
 
-    mis = poly.multi_index
-    grid = poly.grid
     nodes = grid.unisolvent_nodes
+    exponents = grid.multi_index.exponents
 
     VA = np.zeros((len(nodes), len(nodes)))
-    exponents = mis.exponents
     for j in range(len(nodes)):
         VA[:, j] = eval_legendre_multidim(exponents[j,:], nodes) # we need to pass a 2D array to the polynomial
 
-    if unisolvent_node_vals is None:
-        # If the node values are not provided, we need to evaluate the polynomial at the nodes
-        unisolvent_node_vals = poly(nodes)
-
     leg_coeffs = solve(VA, unisolvent_node_vals)
-    return mis, leg_coeffs
+    return leg_coeffs
 
 ############## MONTE CARLO ####################
 
@@ -66,13 +60,8 @@ def mean_mc(m, fun, N=1000):
     """
         Compute the mean of the function using Monte Carlo method.
     """
-    # Generate N random points from m-dimensional cube [-1,1]^m
     x = np.random.uniform(-1, 1, (N, m))
-    
-    # Evaluate function at these points
     fun_vals = fun(x)
-    
-    # Compute mean
     mean = np.mean(fun_vals)
     
     return mean
@@ -82,12 +71,8 @@ def var_mc(m, fun, N=1000):
     """
         Compute the variance of the function using Monte Carlo method.
     """
-    # Generate N random points from m-dimensional cube [-1,1]^m
     x = np.random.uniform(-1, 1, (N, m))
-    
-    # Evaluate function at these points
     fun_vals = fun(x) 
-    # Compute variance
     var = np.var(fun_vals)
     
     return var
@@ -99,8 +84,11 @@ def sobol_effect(input, m, fun, N=1000):
 
         We compute both at the same time, to reuse resources.
 
-        The total effect is defined as:
-            $$ ST_j = \frac{1}{2N} \sum_{i=1}^N\left(f(x_j^{(i)}, \mathbf{x}_{\{\sim j\}}^{(i)}) - f(z_j^{(i)}, \mathbf{x}_{\{\sim j\}}^{(i)}) \right)^2 $$
+        The main effect is defined as:
+            $$ S_j \approx \frac{1}{N} \sum_{i=1}^N f(x_j^{(i)}, \mathbf{x}_{\{\sim j\}}^{(i)}) f(x_j^{(i)}, \mathbf{z}_{\{\sim j\}}^{(i)})  - \left(\frac{1}{N}\sum_{i=1}^N f(x^{(i)})\right)^2$$
+
+        and the total effect is defined as:
+            $$ ST_j \approx \frac{1}{2N} \sum_{i=1}^N\left(f(x_j^{(i)}, \mathbf{x}_{\{\sim j\}}^{(i)}) - f(z_j^{(i)}, \mathbf{x}_{\{\sim j\}}^{(i)}) \right)^2 $$
         
         where $\{mathbf{x}_j\}$ and $\{mathbf{z}_j\}$ are independently generated points.
 
@@ -139,18 +127,20 @@ def var_leg(leg_coeffs):
     """
         Compute the variance of the function based on the Legendre coefficients.
     """
-    return sum(leg_coeffs[1:]**2)
+    return np.sum(leg_coeffs[1:]**2)
 
 def _var_masked(leg_coeffs, mask):
     """
         Compute the variance of the function based on the Legendre coefficients.
         We use a mask to select the coefficients we want to include in the variance.
+
+        We always skip the first coefficient, which is the mean of the polynomial.
     """
     mask[0] = False # we don't want to include the mean in the variance
     if not mask.any():
         return np.nan
     masked_coeffs = leg_coeffs[mask]
-    var_sum = sum(masked_coeffs**2)
+    var_sum = np.sum(masked_coeffs**2)
     return var_sum / var_leg(leg_coeffs)
 
 def sobol_total_effect_leg(input, mis, leg_coeffs):
@@ -195,17 +185,6 @@ def sobol_main_effect_leg(input, mis, leg_coeffs):
     return _var_masked(leg_coeffs, mask)
 
 
-def _get_exp_mask_leq_m(mis, m):
-    """
-        Get the mask for the exponents that are less than or equal to m.
-        This is used to compute the effective dimension of the polynomial.
-    """
-    mask = np.zeros(mis.exponents.shape[0], dtype=bool)
-    for i in range(mis.exponents.shape[0]):
-        if np.sum(mis.exponents, axis=0) <= m:
-            mask[i] = True
-    return mask
-
 def effective_dimension_superposition(mis, leg_coeffs, p=0.99):
     r"""
         Compute the effective dimension of the polynomial based on the Legendre coefficients.
@@ -216,6 +195,8 @@ def effective_dimension_superposition(mis, leg_coeffs, p=0.99):
         $$
             m_s = \min\{m: \sum_{|u|\leq m} \sigma_{u}^2 \geq p \sigma^2 \}
         $$
+
+        Where $|u|$ is the number of non-zero elements in the vector $u$.
     """
     dims = mis.exponents.shape[1]
 
@@ -259,14 +240,14 @@ def main():
     # The interpolation approach
     n = 7
     p = 1
-    
+  
+    mis = mp.MultiIndexSet.from_degree(m, n, p)
+    grid = mp.Grid(mis)
+    nodes = grid.unisolvent_nodes
+    unisolvent_node_vals = MU(nodes)
+
     start_time = time.time()
-    
-    poly, unisolvent_node_vals = interpolate(m, n, p, MU)
-    interpolate_time = time.time() - start_time
-    
-    start_time = time.time()
-    mis, leg_coeffs = convert_to_legendre(poly, unisolvent_node_vals)
+    leg_coeffs = convert_to_legendre(grid, unisolvent_node_vals)
     legendre_time = time.time() - start_time
     
     start_time = time.time()
@@ -314,7 +295,7 @@ def main():
         table_data.append([f"{i}: ${input_names[i]}$", f"{st:.6f}", f"{mc:.6f}", f"{abs(st-mc):.6f}"])
     
     # Print the table using tabulate with latex format
-    print(tabulate(table_data, headers=headers, tablefmt="latex_raw"))
+    print(tabulate(table_data, headers=headers, tablefmt="grid"))
 
     print("\nSobol's total effect")
     # Create table headers and data
@@ -325,7 +306,7 @@ def main():
         mc = importances_mc[i][1] # Monte Carlo total effect
         table_data.append([f"{i}: ${input_names[i]}$", f"{st:.6f}", f"{mc:.6f}", f"{abs(st-mc):.6f}"])
 
-    print(tabulate(table_data, headers=headers, tablefmt="latex_raw"))
+    print(tabulate(table_data, headers=headers, tablefmt="grid"))
 
     print("\nEffective dimension:")
     print(f"   Superposition: {effective_dimension_superposition(mis, leg_coeffs):.6f}")
@@ -334,12 +315,10 @@ def main():
 
 
     print(f"\nTiming:")
-    print(f"Interpolation: {interpolate_time:.4f} seconds")
     print(f"Convert to Legendre: {legendre_time:.4f} seconds")
     print(f"Sobol calculations: {sobol_time:.4f} seconds")
-    print(f"Total Legendre: {interpolate_time + legendre_time + sobol_time:.4f} seconds")
     print(f"Monte Carlo calculations: {monte_carlo_time:.4f} seconds")
-    print(f"Total: {interpolate_time + legendre_time + sobol_time + monte_carlo_time:.4f} seconds")
+    print(f"Total: {legendre_time + sobol_time + monte_carlo_time:.4f} seconds")
 
 if __name__ == "__main__":
     main()
